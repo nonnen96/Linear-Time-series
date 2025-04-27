@@ -42,7 +42,7 @@ The autocorrelation function (ACF) shows a persistent correlation at higher lags
 
 ```{r}
 time_series_zoo_diff <- diff(time_series_zoo)
-plot(time_series_diff, type = "l", col = "blue", lwd = 2, 
+plot(time_series_zoo_diff, type = "l", col = "blue", lwd = 2, 
      xlab = "Time", ylab = "Differenced Values", 
      main = "Differenced Time Series")
 ```
@@ -50,7 +50,7 @@ plot(time_series_diff, type = "l", col = "blue", lwd = 2,
 The drift that was present in the original series seems to have been effectively corrected, as the differenced values no longer exhibit the same persistent trend. This suggests that the differencing step has successfully stabilized the mean of the series, making it more suitable for further analysis, such as modeling or forecasting.
 
 ```{r}
-adf_test_result <- adf.test(time_series_diff, alternative = "stationary")
+adf_test_result <- adf.test(time_series_zoo_diff, alternative = "stationary")
 adf_test_result
 ```
 
@@ -66,4 +66,3 @@ pacf(times_series_diff)
 ```
 
 The ACF decreases rapidly after a few lags, indicating that the series is well stationary. Since the series is stationary by differenciating it, it is integrated of order d = 1. The complete autocorrelation functions are statistically significant (i.e. bigger than the bounds ±1, 96/√n of the confidence interval of a null test of the autocorrelation at the 95% level) until q∗ =3 and the partial autocorrelation until p∗ = 3. If y follows an ARIMA(p,d,q), it follows at most an ARIMA(p∗ = 6, d∗ =1,q\*= 3, which we can estimate.
-
