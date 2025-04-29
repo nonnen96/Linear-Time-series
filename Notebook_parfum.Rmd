@@ -1,0 +1,165 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# 1. Data
+
+```{r}
+library(zoo)
+library(tseries)
+library(urca)
+library(forecast)
+library(ggplot2)
+library(reshape2)
+library(forecast)
+library(lmtest)
+```
+
+```{r}
+df <- read.csv("valeurs_mensuelles_parfum.csv", sep = ";", skip=3)
+df <- df[, 1:2]
+colnames(df) <- c("DATE", "VALUES")
+head(df)
+```
+
+## 1.1 What does the chosen series represent?
+
+This project involves loading a dataset containing monthly values from a CSV file. The data is processed by skipping the initial rows that contain metadata, and the first two columns, which represent the date and corresponding values, are extracted. These columns are then renamed to "DATE" and "VALEURS" for clearer analysis and visualization in the subsequent steps of the project.
+
+```{r}
+df$DATE <- as.Date(paste(df$DATE, "-01", sep=""), format="%Y-%m-%d")
+time_series_zoo <- zoo(df$VALUES, order.by = df$DATE)
+head(time_series_zoo)
+```
+
+```{r}
+plot(time_series_zoo, type = "l", col = "blue", lwd = 2, 
+     xlab = "Date", ylab = "Values", 
+     main = "Time Series Plot of values")
+```
+
+The time series appears to exhibit a clear trend, indicating that it is not stationary. A stationary time series should have constant statistical properties, such as mean and variance, over time. However, the observed trend suggests that the mean of the series is changing over time, which is a characteristic of non-stationarity.
+
+```{r}
+times_series=ts(time_series_zoo, frequency = 12)
+head(times_series)
+```
+
+```{r}
+acf(times_series)
+pacf(times_series)
+```
+
+The autocorrelation function (ACF) shows a persistent correlation at higher lags, indicating that the series does not decay quickly to zero. This suggests that the series exhibits long-term dependencies and likely contains trends or seasonality, meaning it is not stationary. Given this, we will proceed with differencing the series to remove the trend and make it stationary.
+
+## 1.2 Transformation of the series
+
+```{r}
+time_series_zoo_diff <- diff(time_series_zoo)
+plot(time_series_zoo_diff, type = "l", col = "blue", lwd = 2, 
+     xlab = "Time", ylab = "Differenced Values", 
+     main = "Differenced Time Series")
+```
+
+The drift that was present in the original series seems to have been effectively corrected, as the differenced values no longer exhibit the same persistent trend. This suggests that the differencing step has successfully stabilized the mean of the series, making it more suitable for further analysis, such as modeling or forecasting.
+
+# 2. ARIMA model
+
+##2.1 Model selection
+
+```{r}
+times_series_diff=ts(time_series_zoo_diff, frequency = 12)
+acf(times_series_diff)
+pacf(times_series_diff)
+```
+
+The ACF decreases rapidly after a few lags, indicating that the series is well stationary. Since the series is stationary by differenciating it, it is integrated of order d = 1. The complete autocorrelation functions are statistically significant (i.e. bigger than the bounds ±1, 96/√n of the confidence interval of a null test of the autocorrelation at the 95% level) until q∗ =2 and the partial autocorrelation until p∗ = 2. If y follows an ARIMA(p,d,q), it follows at most an ARIMA(p∗ = 2, d∗ =1,q\*= 2, which we can estimate.
+
+## 2.2 AIC and BIC
+
+```{r}
+results <- data.frame(p = integer(), q = integer(), AIC = numeric(), BIC = numeric())
+
+for (p in 0:2) {
+  for (q in 0:2) {
+    fit <- Arima(times_series_diff, order = c(p, 1, q))
+    results <- rbind(results, data.frame(p = p, q = q, AIC = AIC(fit), BIC = BIC(fit)))
+  }
+}
+
+results[order(results$BIC), ]
+
+```
+
+We compute the AIC and BIC values for all ARIMA(p,1,q) models with p and q ranging from 0 to 2. The model that minimizes the BIC is ARIMA(1,1,2), and the model that minimizes the AIC is ARIMA(1,1,2) too. This difference is expected, as the BIC imposes a stronger penalty on model complexity than the AIC, often favoring more parsimonious models.
+
+```{r}
+arima(times_series_diff,c(1,1,2))
+```
+
+In the ARIMA(1,1,2) model, the ar1 coefficient is estimated at 0.7083 with a standard error of 0.0962. The ratio of the estimate to its standard error (i.e., the z-value) is approximately 7.36, which is well above the conventional threshold of 1.96 for statistical significance at the 5% level. This suggests that the ar1 coefficient is significantly different from zero.
+
+Similarly, the ma2 coefficient is estimated at 0.9190 with a standard error of 0.0741, yielding a z-value of about 12.4. This also indicates strong statistical significance.
+
+Therefore, both ar1 and ma2 are significantly different from zero, implying that they contribute meaningfully to the model.
+
+## 2.3 Whiteness and normality of the residuals
+
+```{r}
+fit <- Arima(times_series_diff, order = c(1, 1, 2))
+
+Qtests <- function(residuals, k, fitdf = 3) {
+  pvals <- apply(matrix(1:k), 1, FUN = function(l) {
+    pval <- if (l <= fitdf) NA else Box.test(residuals, lag = l, type = "Ljung-Box", fitdf = fitdf)$p.value
+    return(c("lag" = l, "pval" = pval))
+  })
+  return(t(pvals))
+}
+
+Qtests(residuals(fit), 24, fitdf = 3)
+
+```
+
+The results show that there are significant autocorrelations in the residuals at certain lags, particularly up to lag 6. This suggests that the ARIMA(1,1,2) model may not have fully captured some dependencies in the data.It would be worth considering adjustments to the model or exploring other ARIMA orders to better capture these patterns.
+
+```{r}
+Qtests <- function(series, k, fitdf=0) {
+  pvals <- apply(matrix(1:k), 1, FUN=function(l) {
+    pval <- if (l<=fitdf) NA else Box.test(series, lag=l, type="Ljung-Box", fitdf=fitdf)$p.value
+    return(c("lag"=l, "pval"=pval))
+  })
+  return(t(pvals))
+}
+
+p_values <- 0:2
+q_values <- 0:2
+
+results <- list()
+
+for (p in p_values) {
+  for (q in q_values) {
+    fit <- Arima(times_series_diff, order=c(p, 1, q))
+    lb_results <- Qtests(fit$residuals, k=24, fitdf=p+q) # Tester jusqu'à 24 lags
+    model_name <- paste("ARIMA(", p, ",1,", q, ")", sep="")
+    results[[model_name]] <- lb_results
+  }
+}
+for (model_name in names(results)) {
+  cat("\n", model_name, ":\n")
+  print(results[[model_name]])
+}
+
+```
+
+The model ARIMA(1,1,2) seems however to be the best, because all the other models don't have uncorrelated residuals. Let's consider this model to make predictions and see if he can forecast datas.
+
+# 3. Prediction
+
+```{r}
+fit <- arima(times_series_diff, order = c(1, 1, 2))
+forecast_values <- forecast(fit, h = 2)
+plot(forecast_values, main = "Confidence region at 95% for an ARIMA(1,1,2)", xlim=c(30,37), col="darkblue",lwd=2,  flwd=1,shadecols = rgb(0.8, 0.8, 0.8, 0.5), ylab = "Values of the series",xlab = "Time")  
+```
+
+We can now graphically represent the confidence region for α = 95%. The light blue area shows the 95% confidence interval. The dark blue points correspond to the prediction.
