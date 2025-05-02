@@ -29,7 +29,7 @@ This project involves loading a dataset containing monthly values from a CSV fil
 
 ```{r}
 df$DATE <- as.Date(paste(df$DATE, "-01", sep=""), format="%Y-%m-%d")
-time_series_zoo <- zoo(df$VALUES, order.by = df$DATE)
+time_series_zoo <- log(zoo(df$VALUES, order.by = df$DATE))
 head(time_series_zoo)
 ```
 
@@ -42,13 +42,16 @@ plot(time_series_zoo, type = "l", col = "blue", lwd = 2,
 The time series appears to exhibit a clear trend, indicating that it is not stationary. A stationary time series should have constant statistical properties, such as mean and variance, over time. However, the observed trend suggests that the mean of the series is changing over time, which is a characteristic of non-stationarity.
 
 ```{r}
-times_series=ts(time_series_zoo, frequency = 12)
-head(times_series)
+time_series=ts(time_series_zoo, frequency = 12)
+head(time_series)
+plot(time_series, type = "l", col = "blue", lwd = 2, 
+     xlab = "Date", ylab = "Values", 
+     main = "Time Series Plot of values")
 ```
 
 ```{r}
-acf(times_series)
-pacf(times_series)
+acf(time_series)
+pacf(time_series)
 ```
 
 The autocorrelation function (ACF) shows a persistent correlation at higher lags, indicating that the series does not decay quickly to zero. This suggests that the series exhibits long-term dependencies and likely contains trends or seasonality, meaning it is not stationary. Given this, we will proceed with differencing the series to remove the trend and make it stationary.
@@ -76,26 +79,31 @@ pacf(times_series_diff)
 
 The ACF decreases rapidly after a few lags, indicating that the series is well stationary. Since the series is stationary by differenciating it, it is integrated of order d = 1. The complete autocorrelation functions are statistically significant (i.e. bigger than the bounds ±1, 96/√n of the confidence interval of a null test of the autocorrelation at the 95% level) until q∗ =2 and the partial autocorrelation until p∗ = 2. If y follows an ARIMA(p,d,q), it follows at most an ARIMA(p∗ = 2, d∗ =1,q\*= 2, which we can estimate.
 
+```{r}
+adf.test(times_series_diff)
+ur.pp(times_series_diff, type = "Z-tau", model = "trend", lags = "short")
+```
+
 ## 2.2 AIC and BIC
 
 ```{r}
 results <- data.frame(p = integer(), q = integer(), AIC = numeric(), BIC = numeric())
 
-for (p in 0:2) {
-  for (q in 0:2) {
+for (p in 0:7) {
+  for (q in 0:9) {
     fit <- Arima(times_series_diff, order = c(p, 1, q))
     results <- rbind(results, data.frame(p = p, q = q, AIC = AIC(fit), BIC = BIC(fit)))
   }
 }
 
-results[order(results$BIC), ]
+results[order(results$AIC), ]
 
 ```
 
 We compute the AIC and BIC values for all ARIMA(p,1,q) models with p and q ranging from 0 to 2. The model that minimizes the BIC is ARIMA(1,1,2), and the model that minimizes the AIC is ARIMA(1,1,2) too. This difference is expected, as the BIC imposes a stronger penalty on model complexity than the AIC, often favoring more parsimonious models.
 
 ```{r}
-arima(times_series_diff,c(1,1,2))
+arima(times_series_diff,c(2,1,9))
 ```
 
 In the ARIMA(1,1,2) model, the ar1 coefficient is estimated at 0.7083 with a standard error of 0.0962. The ratio of the estimate to its standard error (i.e., the z-value) is approximately 7.36, which is well above the conventional threshold of 1.96 for statistical significance at the 5% level. This suggests that the ar1 coefficient is significantly different from zero.
@@ -107,7 +115,7 @@ Therefore, both ar1 and ma2 are significantly different from zero, implying that
 ## 2.3 Whiteness and normality of the residuals
 
 ```{r}
-fit <- Arima(times_series_diff, order = c(1, 1, 2))
+fit <- Arima(times_series_diff, order = c(2, 1, 9))
 
 Qtests <- function(residuals, k, fitdf = 3) {
   pvals <- apply(matrix(1:k), 1, FUN = function(l) {
@@ -157,9 +165,11 @@ The model ARIMA(1,1,2) seems however to be the best, because all the other model
 # 3. Prediction
 
 ```{r}
-fit <- arima(times_series_diff, order = c(1, 1, 2))
+fit <- arima(times_series_diff, order = c(2, 1, 9))
+checkresiduals(fit)
 forecast_values <- forecast(fit, h = 2)
-plot(forecast_values, main = "Confidence region at 95% for an ARIMA(1,1,2)", xlim=c(30,37), col="darkblue",lwd=2,  flwd=1,shadecols = rgb(0.8, 0.8, 0.8, 0.5), ylab = "Values of the series",xlab = "Time")  
+plot(forecast_values, main = "Confidence region at 95% for an ARIMA(1,1,2)", xlim=c(32,37),ylim=c(-0.2, 0.2), col="darkblue",lwd=2,  flwd=1,shadecols = rgb(0.8, 0.8, 0.8, 0.5), ylab = "Values of the series",xlab = "Time")  
 ```
 
 We can now graphically represent the confidence region for α = 95%. The light blue area shows the 95% confidence interval. The dark blue points correspond to the prediction.
+
